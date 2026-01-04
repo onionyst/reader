@@ -1,10 +1,12 @@
 package models
 
 import (
+	"database/sql"
 	"errors"
 	"time"
 
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 
 	"reader/internal/app/reader"
 )
@@ -36,24 +38,18 @@ func AddEntry(entry *Entry) (int64, error) {
 	return entry.ID, nil
 }
 
-// AddEntryWithDateCount adds entries with date count offset
-func AddEntryWithDateCount(entry *Entry) (int64, error) {
-	var entryID int64
-	err := db.Transaction(func(tx *gorm.DB) error {
-		count, err := GetEntryCountForFeedDate(entry.FeedID, entry.Date)
-		if err != nil {
-			return err
-		}
-
-		entry.Date = entry.Date.Add(time.Second * time.Duration(count))
-		if entryID, err = AddEntry(entry); err != nil {
-			return err
-		}
-
+// AddEntries inserts new entries while ignoring duplicates
+func AddEntries(entries []Entry) error {
+	if len(entries) == 0 {
 		return nil
-	})
+	}
 
-	return entryID, err
+	const batchSize = 200
+
+	return db.
+		Clauses(clause.OnConflict{DoNothing: true}).
+		CreateInBatches(&entries, batchSize).
+		Error
 }
 
 // AllScope generates all scope for query
@@ -86,33 +82,28 @@ func ContinuationScope(id int64, asc bool) func(*gorm.DB) *gorm.DB {
 	}
 }
 
-// CountScope generates count scope for query
-func CountScope(n int) func(*gorm.DB) *gorm.DB {
-	return func(db *gorm.DB) *gorm.DB {
-		return db.Limit(n)
+// ExistingGUIDsForFeed returns GUIDs that exist in feed
+func ExistingGUIDsForFeed(feedID int64, gUIDs []string) (map[string]struct{}, error) {
+	if len(gUIDs) == 0 {
+		return map[string]struct{}{}, nil
 	}
-}
 
-// ExistingGUIDs returns GUIDs that exist
-func ExistingGUIDs(gUIDs []string) ([]string, error) {
-	type result struct {
+	var rows []struct {
 		GUID string
 	}
-
-	var results []result
 	if res := db.Model(&Entry{}).
 		Select("guid").
+		Where("feed_id = ?", feedID).
 		Where("guid IN ?", gUIDs).
-		Scan(&results); res.Error != nil {
+		Scan(&rows); res.Error != nil {
 		return nil, res.Error
 	}
 
-	var exists []string
-	for _, res := range results {
-		exists = append(exists, res.GUID)
+	set := make(map[string]struct{}, len(rows))
+	for _, row := range rows {
+		set[row.GUID] = struct{}{}
 	}
-
-	return exists, nil
+	return set, nil
 }
 
 // FeedScope generates feed scope for query
@@ -137,6 +128,23 @@ func GetEntryCountForFeedDate(feedID int64, date time.Time) (int, error) {
 	return int(count), nil
 }
 
+// GetLatestFeedDate gets latest date of feed
+func GetLatestFeedDate(feedID int64) (time.Time, error) {
+	var nt sql.NullTime
+	if res := db.Model(&Entry{}).
+		Where("feed_id = ?", feedID).
+		Select("MAX(date)").
+		Scan(&nt); res.Error != nil {
+		return time.Time{}, res.Error
+	}
+
+	if !nt.Valid {
+		return time.Time{}, nil
+	}
+
+	return nt.Time.UTC(), nil
+}
+
 // IsEntryExist returns true if entry with guid exists
 func IsEntryExist(guid string) (bool, error) {
 	var entry *Entry
@@ -151,28 +159,31 @@ func IsEntryExist(guid string) (bool, error) {
 }
 
 // ListEntryIDs list Entry IDs with conditions
-func ListEntryIDs(scopes ...func(*gorm.DB) *gorm.DB) ([]int64, int, error) {
+func ListEntryIDs(limit int, scopes ...func(*gorm.DB) *gorm.DB) ([]int64, bool, error) {
 	type EntryID struct {
 		ID int64
 	}
 
-	var entries []*EntryID
-	var count int64
-
+	var rows []*EntryID
 	if res := db.Model(&Entry{}).
 		Select("entries.id").
 		Scopes(scopes...).
-		Scan(&entries).
-		Count(&count); res.Error != nil {
-		return nil, 0, res.Error
+		Limit(limit + 1).
+		Scan(&rows); res.Error != nil {
+		return nil, false, res.Error
 	}
 
-	var ids []int64
-	for _, entry := range entries {
-		ids = append(ids, entry.ID)
+	hasMore := len(rows) > limit
+	if hasMore {
+		rows = rows[:limit]
 	}
 
-	return ids, int(count), nil
+	ids := make([]int64, len(rows))
+	for i, row := range rows {
+		ids[i] = row.ID
+	}
+
+	return ids, hasMore, nil
 }
 
 // ListEntriesByIDs list Entries by IDs

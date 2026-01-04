@@ -16,7 +16,7 @@ func ConnectDatabase(host string, port int, database, username, password string)
 		Logger: logger.Default.LogMode(logger.Silent),
 	})
 	if err != nil {
-		panic("failed to connect database")
+		panic(fmt.Sprintf("failed to connect database: %v", err))
 	}
 
 	return db

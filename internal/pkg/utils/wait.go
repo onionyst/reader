@@ -1,42 +1,52 @@
 package utils
 
 import (
+	"context"
+	"fmt"
 	"net"
-	"sync"
 	"time"
+
+	"golang.org/x/sync/errgroup"
 )
 
-// Wait waits services to hold for seconds
-func Wait(services []string, sec int) bool {
-	now := time.Now()
+func Wait(services []string, timeout int) {
+	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(timeout)*time.Second)
+	defer cancel()
 
-	var wg sync.WaitGroup
-	wg.Add(len(services))
-
-	success := make(chan bool, 1)
-
-	go func() {
-		for _, service := range services {
-			go waitOne(service, &wg, now)
-		}
-		wg.Wait()
-		success <- true
-	}()
-
-	select {
-	case <-success:
-		return true
-	case <-time.After(time.Duration(sec) * time.Second):
-		return false
+	if err := waitContext(ctx, services); err != nil {
+		panic(fmt.Errorf("dependency services failed: %w", err))
 	}
 }
 
-func waitOne(service string, wg *sync.WaitGroup, start time.Time) {
-	defer wg.Done()
-	for {
-		if _, err := net.Dial("tcp", service); err == nil {
-			break
-		}
-		time.Sleep(time.Second)
+func waitContext(ctx context.Context, services []string) error {
+	if len(services) == 0 {
+		return nil
 	}
+
+	dialer := &net.Dialer{
+		Timeout: 2 * time.Second,
+	}
+	g, ctx := errgroup.WithContext(ctx)
+
+	for _, srv := range services {
+		g.Go(func() error {
+			ticker := time.NewTicker(1 * time.Second)
+			defer ticker.Stop()
+
+			for {
+				conn, err := dialer.DialContext(ctx, "tcp", srv)
+				if err == nil {
+					_ = conn.Close()
+					return nil
+				}
+				select {
+				case <-ctx.Done():
+					return ctx.Err()
+				case <-ticker.C:
+				}
+			}
+		})
+	}
+
+	return g.Wait()
 }

@@ -34,31 +34,33 @@ const (
 
 func checkAuth() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		// TODO: use c.Abort series functions
-
 		auth := c.Request.Header.Get("Authorization")
 		if !strings.HasPrefix(auth, authPrefix) {
-			c.JSON(routes.InvalidCredentialsError("Authorization header"))
+			routes.AbortWithError(c, routes.ErrInvalidCredentials(), fmt.Errorf("missing Authorization header"))
 			return
 		}
 
 		sID := strings.TrimPrefix(auth, authPrefix)
 		s := strings.Split(sID, "/")
 		if len(s) != 2 {
-			c.JSON(routes.InvalidCredentialsError("Authorization header"))
+			routes.AbortWithError(c, routes.ErrInvalidCredentials(), fmt.Errorf("missing token"))
 			return
 		}
 
 		user, err := models.GetUser(s[0])
-		if err != nil || user == nil {
-			c.JSON(routes.InvalidCredentialsError(""))
+		if err != nil {
+			routes.AbortWithError(c, routes.ErrInvalidCredentials(), fmt.Errorf("failed to get user %s: %w", s[0], err))
+			return
+		}
+		if user == nil {
+			routes.AbortWithError(c, routes.ErrInvalidCredentials(), fmt.Errorf("user %s not found", s[0]))
 			return
 		}
 
 		salt := os.Getenv("APP_SALT")
 		hash := utils.Sha1(fmt.Sprintf("%s%s%s", salt, user.Email, user.Password))
 		if s[1] != hash {
-			c.JSON(routes.InvalidCredentialsError(""))
+			routes.AbortWithError(c, routes.ErrInvalidCredentials(), fmt.Errorf("invalid token"))
 			return
 		}
 
@@ -70,29 +72,33 @@ func checkAuth() gin.HandlerFunc {
 func checkToken(user *models.User, token string) bool {
 	salt := os.Getenv("APP_SALT")
 	hash := utils.Sha1(fmt.Sprintf("%s%d%s", salt, user.ID, user.Password))
-	return token == utils.PadString(hash, "Z", 57, false)
+	return token == utils.PadString(hash, 'Z', 57, false)
 }
 
 func generateToken(user *models.User) string {
 	salt := os.Getenv("APP_SALT")
 	hash := utils.Sha1(fmt.Sprintf("%s%d%s", salt, user.ID, user.Password))
-	return utils.PadString(hash, "Z", 57, false)
+	return utils.PadString(hash, 'Z', 57, false)
 }
 
 func clientLogin(c *gin.Context) {
 	var login Login
 	if err := c.ShouldBind(&login); err != nil {
-		c.JSON(routes.InvalidParameterError("Email or Passwd"))
+		routes.AbortWithError(c, routes.ErrInvalidParameter("Email or Password"), fmt.Errorf("failed to bind login param: %w", err))
 		return
 	}
 
 	user, err := models.GetUser(login.Email)
-	if err != nil || user == nil {
-		c.JSON(routes.InvalidCredentialsError(""))
+	if err != nil {
+		routes.AbortWithError(c, routes.ErrInvalidCredentials(), fmt.Errorf("get user %s: %w", login.Email, err))
 		return
 	}
-	if !utils.VerifyPassword(login.Password, user.Password) {
-		c.JSON(routes.InvalidCredentialsError(""))
+	if user == nil {
+		routes.AbortWithError(c, routes.ErrInvalidCredentials(), fmt.Errorf("user %s not found", login.Email))
+		return
+	}
+	if ok, err := utils.VerifyPassword(login.Password, user.Password); err != nil || !ok {
+		routes.AbortWithError(c, routes.ErrInvalidCredentials(), fmt.Errorf("invalid password"))
 		return
 	}
 
@@ -107,7 +113,7 @@ func clientLogin(c *gin.Context) {
 func token(c *gin.Context) {
 	userData, ok := c.Get("user")
 	if !ok {
-		c.JSON(routes.InternalServerError())
+		routes.AbortWithError(c, routes.ErrInternalServer(), fmt.Errorf("missing user in context"))
 		return
 	}
 
@@ -119,7 +125,7 @@ func token(c *gin.Context) {
 func userInfo(c *gin.Context) {
 	userData, ok := c.Get("user")
 	if !ok {
-		c.JSON(routes.InternalServerError())
+		routes.AbortWithError(c, routes.ErrInternalServer(), fmt.Errorf("missing user in context"))
 		return
 	}
 
@@ -141,6 +147,6 @@ func userInfo(c *gin.Context) {
 		c.JSON(http.StatusOK, info)
 		return
 	default:
-		c.JSON(routes.InvalidParameterError("output"))
+		routes.AbortWithError(c, routes.ErrInvalidParameter("output"), fmt.Errorf("invalid output: %s", output))
 	}
 }

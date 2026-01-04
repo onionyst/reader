@@ -5,21 +5,33 @@ import (
 	"strings"
 )
 
-// EscapeToUnicodeAlternative escape characters to UNICODE alternatives
+var (
+	unicodeAltBase = strings.NewReplacer(
+		"&", "＆",
+		"<", "＜",
+		">", "＞",
+	)
+
+	unicodeAltExtended = strings.NewReplacer(
+		"&", "＆",
+		"<", "＜",
+		">", "＞",
+		"'", "’",
+		`"`, "＂",
+		"^", "＾",
+		"?", "？",
+		`\`, "＼",
+		"/", "／",
+		",", "，",
+		";", "；",
+	)
+)
+
+// EscapeToUnicodeAlternative escapes ASCII characters into Unicode lookalikes
 func EscapeToUnicodeAlternative(text string, extended bool) string {
 	text = html.UnescapeString(text)
-
-	problem := []string{"&", "<", ">"}
-	replace := []string{"＆", "＜", "＞"}
-
 	if extended {
-		problem = append(problem, "'", "\"", "^", "?", "\\", "/", ",", ";")
-		replace = append(replace, "’", "＂", "＾", "？", "＼", "／", "，", "；")
+		return unicodeAltExtended.Replace(text)
 	}
-
-	for i := range problem {
-		text = strings.ReplaceAll(text, problem[i], replace[i])
-	}
-
-	return text
+	return unicodeAltBase.Replace(text)
 }
