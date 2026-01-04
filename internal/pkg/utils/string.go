@@ -1,31 +1,33 @@
 package utils
 
 import (
-	"fmt"
 	"strconv"
 	"strings"
 )
 
-// AllDigits returns true if all digits of string is digit
+// AllDigits reports string non-empty and consists only of ASCII digits
 func AllDigits(s string) bool {
-	isNotDigit := func(c rune) bool { return c < '0' || c > '9' }
-	return strings.IndexFunc(s, isNotDigit) == -1
+	if s == "" {
+		return false
+	}
+	for _, c := range s {
+		if c < '0' || c > '9' {
+			return false
+		}
+	}
+	return true
 }
 
-// PadString pad string with single character to given length
-func PadString(s string, p string, n int, left bool) string {
-	if len(s) >= n {
+// PadString pad string with single character to reach length
+func PadString(s string, pad byte, n int, left bool) string {
+	if pad == 0 || n <= 0 || len(s) >= n {
 		return s
 	}
+	padding := strings.Repeat(string(pad), n-len(s))
 	if left {
-		return fmt.Sprintf("%s%s", strings.Repeat(p, n-len(s)), s)
+		return padding + s
 	}
-	return fmt.Sprintf("%s%s", s, strings.Repeat(p, n-len(s)))
-}
-
-// Trim trim common characters
-func Trim(s string) string {
-	return strings.Trim(s, "\t\n\r\x00\x0B")
+	return s + padding
 }
 
 // UnescapeUnicode un-escapes unicode string

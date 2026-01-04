@@ -16,6 +16,7 @@ type Feed struct {
 	Priority int8   `gorm:"default:10;not null;index"`
 	URL      string `gorm:"type:varchar(255);not null;unique"`
 	Website  string `gorm:"type:varchar(255)"`
+	IconURL  string `gorm:"type:varchar(255)"`
 
 	Category   *Category
 	CategoryID int64
@@ -23,12 +24,13 @@ type Feed struct {
 }
 
 // AddFeed adds a feed
-func AddFeed(name string, priority int8, url, website string, categoryID int64) (int64, error) {
+func AddFeed(name string, priority int8, url, website, iconURL string, categoryID int64) (int64, error) {
 	feed := &Feed{
 		Name:       name,
 		Priority:   priority,
 		URL:        url,
 		Website:    website,
+		IconURL:    iconURL,
 		CategoryID: categoryID,
 	}
 	if res := db.Create(&feed); res.Error != nil {

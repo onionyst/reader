@@ -29,5 +29,5 @@ func SetupRoutes(router *gin.Engine) {
 		}
 	}
 
-	router.GET("ping", ping)
+	router.GET("healthz", healthz)
 }

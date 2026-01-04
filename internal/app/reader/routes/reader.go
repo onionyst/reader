@@ -4,7 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"html"
-	"io/ioutil"
+	"io"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -82,7 +82,7 @@ func parseStreamParams(c *gin.Context) *reader.StreamParams {
 	params.Filter = c.Request.URL.Query().Get("it")
 	params.Count = 20
 	if v := c.Request.URL.Query().Get("n"); v != "" {
-		if v, err := strconv.Atoi(v); err == nil {
+		if v, err := strconv.Atoi(v); err == nil && v >= 0 {
 			params.Count = v
 		}
 	}
@@ -103,7 +103,7 @@ func parseStreamParams(c *gin.Context) *reader.StreamParams {
 			params.StopTime = v
 		}
 	}
-	if v := utils.Trim(c.Request.URL.Query().Get("c")); v != "" {
+	if v := strings.TrimSpace(c.Request.URL.Query().Get("c")); v != "" {
 		if v, err := strconv.ParseInt(v, 10, 64); err == nil {
 			params.Continuation = v
 		}
@@ -113,34 +113,38 @@ func parseStreamParams(c *gin.Context) *reader.StreamParams {
 }
 
 func editTag(c *gin.Context) {
-	body, err := ioutil.ReadAll(c.Request.Body)
+	body, err := io.ReadAll(c.Request.Body)
 	if err != nil {
-		c.JSON(routes.InternalServerError())
+		routes.AbortWithError(c, routes.ErrInternalServer(), fmt.Errorf("failed to read body: %w", err))
 		return
 	}
 
 	bodyPosts, err := parsePostBody(string(body))
 	if err != nil {
-		c.JSON(routes.InternalServerError())
+		routes.AbortWithError(c, routes.ErrInternalServer(), fmt.Errorf("failed to parse post body: %w", err))
 		return
 	}
 
 	v, ok := bodyPosts["T"]
-	if !ok || len(v) != 1 {
-		c.JSON(routes.InvalidParameterError("T"))
+	if !ok {
+		routes.AbortWithError(c, routes.ErrInvalidParameter("T"), fmt.Errorf("missing token in post body"))
+		return
+	}
+	if len(v) != 1 {
+		routes.AbortWithError(c, routes.ErrInvalidParameter("T"), fmt.Errorf("invalid token in post body: %v", v))
 		return
 	}
 
-	token := utils.Trim(v[0])
+	token := strings.TrimSpace(v[0])
 
 	userData, ok := c.Get("user")
 	if !ok {
-		c.JSON(routes.InternalServerError())
+		routes.AbortWithError(c, routes.ErrInternalServer(), fmt.Errorf("missing user in context"))
 		return
 	}
 
 	if !checkToken(userData.(*models.User), token) {
-		c.JSON(routes.InvalidCredentialsError("token"))
+		routes.AbortWithError(c, routes.ErrInvalidCredentials(), fmt.Errorf("invalid token"))
 		return
 	}
 
@@ -156,7 +160,7 @@ func editTag(c *gin.Context) {
 
 	ids, ok := bodyPosts["i"]
 	if !ok {
-		c.JSON(routes.InvalidParameterError("i"))
+		routes.AbortWithError(c, routes.ErrInvalidParameter("i"), fmt.Errorf("missing entry ID in post body"))
 		return
 	}
 
@@ -164,22 +168,21 @@ func editTag(c *gin.Context) {
 	for _, id := range ids {
 		_id, err := parseEntryID(id)
 		if err != nil {
-			c.JSON(routes.InvalidParameterError("i"))
+			routes.AbortWithError(c, routes.ErrInvalidParameter("i"), fmt.Errorf("invalid entry ID %s: %w", id, err))
 			return
 		}
-
 		entryIDs = append(entryIDs, _id)
 	}
 
 	switch addTag {
 	case "user/-/state/com.google/read":
 		if _, err := models.MarkRead(entryIDs, true); err != nil {
-			c.JSON(routes.InternalServerError())
+			routes.AbortWithError(c, routes.ErrInternalServer(), fmt.Errorf("failed to mark read: %w", err))
 			return
 		}
 	case "user/-/state/com.google/starred":
 		if _, err := models.MarkFavorite(entryIDs, true); err != nil {
-			c.JSON(routes.InternalServerError())
+			routes.AbortWithError(c, routes.ErrInternalServer(), fmt.Errorf("failed to mark starred: %w", err))
 			return
 		}
 	default:
@@ -196,13 +199,13 @@ func editTag(c *gin.Context) {
 			tagName = html.EscapeString(tagName)
 			tagID, err := models.GetTagIDForName(tagName)
 			if err != nil {
-				c.JSON(routes.InternalServerError())
+				routes.AbortWithError(c, routes.ErrInternalServer(), fmt.Errorf("failed to get tag ID for name %s: %w", tagName, err))
 				return
 			}
 			if tagID == -1 {
 				_id, err := models.AddTag(tagName)
 				if err != nil {
-					c.JSON(routes.InternalServerError())
+					routes.AbortWithError(c, routes.ErrInternalServer(), fmt.Errorf("failed to add tag %s: %w", tagName, err))
 					return
 				}
 				tagID = _id
@@ -216,12 +219,12 @@ func editTag(c *gin.Context) {
 	switch removeTag {
 	case "user/-/state/com.google/read":
 		if _, err := models.MarkRead(entryIDs, false); err != nil {
-			c.JSON(routes.InternalServerError())
+			routes.AbortWithError(c, routes.ErrInternalServer(), fmt.Errorf("failed to unmark read: %w", err))
 			return
 		}
 	case "user/-/state/com.google/starred":
 		if _, err := models.MarkFavorite(entryIDs, false); err != nil {
-			c.JSON(routes.InternalServerError())
+			routes.AbortWithError(c, routes.ErrInternalServer(), fmt.Errorf("failed to unmark starred: %w", err))
 			return
 		}
 	default:
@@ -229,11 +232,14 @@ func editTag(c *gin.Context) {
 			tagName := html.EscapeString(removeTag[13:])
 			tagID, err := models.GetTagIDForName(tagName)
 			if err != nil {
-				c.JSON(routes.InternalServerError())
+				routes.AbortWithError(c, routes.ErrInternalServer(), fmt.Errorf("failed to get tag %s ID: %w", tagName, err))
 				return
 			}
 			if tagID != -1 {
-				models.RemoveTagForEntries(tagID, entryIDs)
+				if err := models.RemoveTagForEntries(tagID, entryIDs); err != nil {
+					routes.AbortWithError(c, routes.ErrInternalServer(), fmt.Errorf("failed to remove tag %d: %w", tagID, err))
+					return
+				}
 			}
 		}
 	}
@@ -244,21 +250,21 @@ func editTag(c *gin.Context) {
 func listStreamItemContents(c *gin.Context) {
 	params := parseStreamParams(c)
 
-	body, err := ioutil.ReadAll(c.Request.Body)
+	body, err := io.ReadAll(c.Request.Body)
 	if err != nil {
-		c.JSON(routes.InternalServerError())
+		routes.AbortWithError(c, routes.ErrInternalServer(), fmt.Errorf("failed to read body: %w", err))
 		return
 	}
 
 	bodyPosts, err := parsePostBody(string(body))
 	if err != nil {
-		c.JSON(routes.InternalServerError())
+		routes.AbortWithError(c, routes.ErrInternalServer(), fmt.Errorf("failed to parse post body: %w", err))
 		return
 	}
 
 	ids, ok := bodyPosts["i"]
 	if !ok {
-		c.JSON(routes.InvalidParameterError("i"))
+		routes.AbortWithError(c, routes.ErrInvalidParameter("i"), fmt.Errorf("missing entry ID in post body"))
 		return
 	}
 
@@ -266,22 +272,21 @@ func listStreamItemContents(c *gin.Context) {
 	for _, id := range ids {
 		_id, err := parseEntryID(id)
 		if err != nil {
-			c.JSON(routes.InvalidParameterError("i"))
+			routes.AbortWithError(c, routes.ErrInvalidParameter("i"), fmt.Errorf("invalid entry ID %s: %w", id, err))
 			return
 		}
-
 		entryIDs = append(entryIDs, _id)
 	}
 
 	entries, err := models.ListEntriesByIDs(entryIDs, params.Order)
 	if err != nil {
-		c.JSON(routes.InternalServerError())
+		routes.AbortWithError(c, routes.ErrInternalServer(), fmt.Errorf("failed to list entries: %w", err))
 		return
 	}
 
 	feedCategoryNames, err := models.GetFeedAndCategoryNames()
 	if err != nil {
-		c.JSON(routes.InternalServerError())
+		routes.AbortWithError(c, routes.ErrInternalServer(), fmt.Errorf("failed to get feed and category names: %w", err))
 		return
 	}
 
@@ -292,13 +297,13 @@ func listStreamItemContents(c *gin.Context) {
 
 	entryTagNames, err := models.GetTagNamesForEntryIDs(entryIDs)
 	if err != nil {
-		c.JSON(routes.InternalServerError())
+		routes.AbortWithError(c, routes.ErrInternalServer(), fmt.Errorf("failed to get tag names: %w", err))
 		return
 	}
 
 	var items []*reader.StreamContentItem
 	for _, entry := range entries {
-		entryID := utils.PadString(strconv.FormatInt(entry.ID, 16), "0", 16, true)
+		entryID := utils.PadString(strconv.FormatInt(entry.ID, 16), '0', 16, true)
 
 		feedName := "_"
 		categoryName := "_"
@@ -365,7 +370,7 @@ func listStreamItemContents(c *gin.Context) {
 		})
 		return
 	default:
-		c.JSON(routes.InvalidParameterError("output"))
+		routes.AbortWithError(c, routes.ErrInvalidParameter("output"), fmt.Errorf("unsupported output: %s", output))
 	}
 }
 
@@ -374,7 +379,7 @@ func listStreamItemIds(c *gin.Context) {
 
 	streamID := c.Request.URL.Query().Get("s")
 	if streamID == "" {
-		c.JSON(routes.InvalidParameterError("s"))
+		routes.AbortWithError(c, routes.ErrInvalidParameter("s"), errors.New("missing stream ID in query"))
 		return
 	}
 
@@ -393,7 +398,7 @@ func listStreamItemIds(c *gin.Context) {
 		} else if i, err := strconv.ParseInt(streamID, 10, 64); err == nil {
 			feedID = i
 		} else if feedID, err = models.GetFeedIDForURL(streamID); err != nil {
-			c.JSON(routes.InternalServerError())
+			routes.AbortWithError(c, routes.ErrInternalServer(), fmt.Errorf("failed to get feed for URL %s: %w", streamID, err))
 			return
 		}
 		scopes = append(scopes, models.FeedScope(feedID))
@@ -402,7 +407,7 @@ func listStreamItemIds(c *gin.Context) {
 
 		categoryID, err := models.GetCategoryIDForName(streamID)
 		if err != nil {
-			c.JSON(routes.InternalServerError())
+			routes.AbortWithError(c, routes.ErrInternalServer(), fmt.Errorf("failed to get category ID for name %s: %w", streamID, err))
 			return
 		}
 		if categoryID != -1 {
@@ -410,7 +415,7 @@ func listStreamItemIds(c *gin.Context) {
 		} else {
 			tagID, err := models.GetTagIDForName(streamID)
 			if err != nil {
-				c.JSON(routes.InternalServerError())
+				routes.AbortWithError(c, routes.ErrInternalServer(), fmt.Errorf("failed to get tag ID for name %s: %w", streamID, err))
 				return
 			}
 			if tagID != -1 {
@@ -452,25 +457,21 @@ func listStreamItemIds(c *gin.Context) {
 	if params.Continuation != 0 {
 		scopes = append(scopes, models.ContinuationScope(params.Continuation, params.Order))
 	}
-	scopes = append(scopes, models.CountScope(params.Count))
 
-	ids, count, err := models.ListEntryIDs(scopes...)
+	ids, hasMore, err := models.ListEntryIDs(params.Count, scopes...)
 	if err != nil {
-		c.JSON(routes.InternalServerError())
+		routes.AbortWithError(c, routes.ErrInternalServer(), fmt.Errorf("failed to list entry IDs: %w", err))
 		return
 	}
 
 	var res reader.StreamItems
-	if len(ids) > 0 {
-		for _, id := range ids {
-			res.Items = append(res.Items, &reader.StreamIDItem{
-				ID: strconv.FormatInt(id, 10),
-			})
-		}
-
-		if count > len(ids) {
-			res.Continuation = ids[len(ids)-1]
-		}
+	for _, id := range ids {
+		res.Items = append(res.Items, &reader.StreamIDItem{
+			ID: strconv.FormatInt(id, 10),
+		})
+	}
+	if hasMore && len(ids) > 0 {
+		res.Continuation = ids[len(ids)-1]
 	}
 
 	c.JSON(http.StatusOK, res)
@@ -479,11 +480,9 @@ func listStreamItemIds(c *gin.Context) {
 func listSubscription(c *gin.Context) {
 	categories, err := models.ListAllCategoriesWithFeeds()
 	if err != nil {
-		c.JSON(routes.InternalServerError())
+		routes.AbortWithError(c, routes.ErrInternalServer(), fmt.Errorf("failed to list all categories with feeds: %w", err))
 		return
 	}
-
-	// TODO: 'iconUrl' => $faviconsUrl . hash('crc32b', $salt . $feed->url())
 
 	var subscriptions []*Feed
 	for _, category := range categories {
@@ -499,7 +498,7 @@ func listSubscription(c *gin.Context) {
 					},
 				},
 				HTMLURL: html.UnescapeString(feed.Website),
-				IconURL: "Feed IconURL",
+				IconURL: html.UnescapeString(feed.IconURL),
 				Title:   utils.EscapeToUnicodeAlternative(feed.Name, true),
 				URL:     html.UnescapeString(feed.URL),
 			})
@@ -516,6 +515,6 @@ func listSubscription(c *gin.Context) {
 		})
 		return
 	default:
-		c.JSON(routes.InvalidParameterError("output"))
+		routes.AbortWithError(c, routes.ErrInvalidParameter("output"), fmt.Errorf("unsupported output: %s", output))
 	}
 }

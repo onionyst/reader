@@ -1,26 +1,61 @@
 package feeds
 
 import (
+	"context"
 	"time"
 
-	"reader/internal/app/reader/feeds/arknights"
-	"reader/internal/app/reader/feeds/genshin"
-	"reader/internal/app/reader/feeds/honkai3"
+	"github.com/sirupsen/logrus"
+	"golang.org/x/sync/semaphore"
+
+	"reader/internal/app/reader/feeds/common"
+	"reader/internal/pkg/downloader"
+	"reader/internal/pkg/scheduler"
 )
 
 const (
-	interval = 600 * time.Second
+	concurrency  = 4
+	httpTimeout  = 20 * time.Second
+	maxPoolSize  = 8
+	pollInterval = 10 * time.Minute
+	pollJitter   = 10 * time.Second
+	stopTimeout  = 5 * time.Second
 )
 
-// LoadFeeds loads all feeds
-func LoadFeeds() {
+// PollFeeds start poll of all feeds
+func PollFeeds(parent context.Context, log *logrus.Logger) (context.Context, context.CancelFunc) {
+	if parent == nil {
+		parent = context.Background()
+	}
+
+	parent, cancel := context.WithCancel(parent)
+
+	deps := common.Deps{
+		HTTP:     downloader.New(httpTimeout),
+		HTTPPool: semaphore.NewWeighted(maxPoolSize),
+		Log:      log,
+	}
+
+	s := scheduler.Scheduler{
+		Interval:    pollInterval,
+		Jitter:      pollJitter,
+		Concurrency: concurrency,
+		NoOverlap:   true,
+		StopTimeout: stopTimeout,
+	}
+
+	errCh := s.Start(parent, loadJobs(deps))
+	done := make(chan struct{})
 	go func() {
-		for {
-			// TODO: catch error return value with channel
-			go arknights.Fetch()
-			go genshin.Fetch()
-			go honkai3.Fetch()
-			<-time.After(interval)
+		defer close(done)
+		for err := range errCh {
+			log.Error(err)
 		}
 	}()
+
+	stop := func() {
+		cancel()
+		<-done
+	}
+
+	return parent, stop
 }

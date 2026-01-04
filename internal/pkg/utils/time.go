@@ -11,10 +11,8 @@ var (
 
 // SetupTimeLocations setups time locations
 func SetupTimeLocations() (err error) {
-	Beijing, err = time.LoadLocation("Asia/Shanghai")
-	if err != nil {
-		return err
+	if Beijing, err = time.LoadLocation("Asia/Shanghai"); err != nil {
+		return
 	}
-
 	return nil
 }

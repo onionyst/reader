@@ -6,6 +6,6 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-func ping(c *gin.Context) {
-	c.String(http.StatusOK, "pong")
+func healthz(c *gin.Context) {
+	c.Status(http.StatusOK)
 }

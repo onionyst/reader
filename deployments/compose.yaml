@@ -22,11 +22,11 @@ services:
     expose:
       - "5432"
     healthcheck:
-      test: [ "CMD", "pg_isready" ]
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
       interval: 10s
       timeout: 5s
       retries: 5
-    image: postgres:14.4-alpine
+    image: postgres:18.1-alpine
     init: true
     networks:
       back-tier:
