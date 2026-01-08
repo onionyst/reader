@@ -79,6 +79,10 @@ func (a apiItem) extImage(channel int) string {
 }
 
 func (a apiItem) gUID() string {
+	return a.link()
+}
+
+func (a apiItem) link() string {
 	return fmt.Sprintf("%s/detail/%d", feedWebsite, a.ID)
 }
 
@@ -125,7 +129,7 @@ func (j *Job) buildEntriesWithContent(channel int, items []apiItem) []models.Ent
 			Content: strings.TrimSpace(utils.SanitizeHTML(item.extImage(channel) + item.Content)),
 			Date:    item.time(),
 			GUID:    item.gUID(),
-			Link:    item.gUID(),
+			Link:    item.link(),
 			Title:   item.Title,
 			FeedID:  j.feedID,
 		}

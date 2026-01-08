@@ -78,7 +78,11 @@ func (a apiItem) extImage(channel int) string {
 	return fmt.Sprintf(extImageTemplate, html.EscapeString(imgs[0].URL))
 }
 
-func (a apiItem) gUID(channel int) string {
+func (a apiItem) gUID() string {
+	return fmt.Sprintf("%s/news/%d", feedWebsite, a.ID)
+}
+
+func (a apiItem) link(channel int) string {
 	return fmt.Sprintf("%s/news/%d/%d", feedWebsite, channel, a.ID)
 }
 
@@ -124,8 +128,8 @@ func (j *Job) buildEntriesWithContent(channel int, items []apiItem) []models.Ent
 			Author:  item.Author,
 			Content: strings.TrimSpace(utils.SanitizeHTML(item.extImage(channel) + item.Content)),
 			Date:    item.time(),
-			GUID:    item.gUID(channel),
-			Link:    item.gUID(channel),
+			GUID:    item.gUID(),
+			Link:    item.link(channel),
 			Title:   item.Title,
 			FeedID:  j.feedID,
 		}
@@ -156,7 +160,7 @@ func (j *Job) fetchChannel(ctx context.Context, channel int) error {
 
 		guids := make([]string, 0, len(resp.Data.List))
 		for _, item := range resp.Data.List {
-			guids = append(guids, item.gUID(channel))
+			guids = append(guids, item.gUID())
 
 			date := item.time()
 			if !hasOldest || date.Before(oldestDate) {
@@ -172,7 +176,7 @@ func (j *Job) fetchChannel(ctx context.Context, channel int) error {
 
 		newItems := make([]apiItem, 0, len(resp.Data.List))
 		for _, item := range resp.Data.List {
-			if _, ok := exists[item.gUID(channel)]; !ok {
+			if _, ok := exists[item.gUID()]; !ok {
 				newItems = append(newItems, item)
 			}
 		}
