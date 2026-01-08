@@ -49,6 +49,10 @@ type apiItem struct {
 }
 
 func (a apiItem) gUID() string {
+	return a.link()
+}
+
+func (a apiItem) link() string {
 	return fmt.Sprintf("%s/%s", feedWebsite, a.ID)
 }
 
@@ -96,7 +100,7 @@ func (j *Job) buildEntriesWithContent(ctx context.Context, items []apiItem) ([]m
 
 	for idx, item := range items {
 		g.Go(func() error {
-			link := item.gUID()
+			link := item.link()
 			html, err := j.fetchArticle(ctx, link)
 			if err != nil {
 				once.Do(func() {
@@ -109,7 +113,7 @@ func (j *Job) buildEntriesWithContent(ctx context.Context, items []apiItem) ([]m
 				Author:  item.Author,
 				Content: html,
 				Date:    item.time(),
-				GUID:    link,
+				GUID:    item.gUID(),
 				Link:    link,
 				Title:   item.Title,
 				FeedID:  j.feedID,
