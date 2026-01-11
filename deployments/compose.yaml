@@ -13,6 +13,16 @@ services:
     ports:
       - "127.0.0.1:${APP_PORT}:3000"
     restart: always
+  migrate:
+    depends_on:
+      postgres:
+        condition: service_healthy
+    env_file: .env
+    image: onionyst/reader:migration
+    networks:
+      - back-tier
+    profiles:
+      - tools
   postgres:
     container_name: reader-postgres
     environment:
@@ -38,10 +48,10 @@ services:
 
 volumes:
   postgres:
-    name: reader_postgres
+    name: reader-postgres
 
 networks:
   back-tier:
-    name: reader_net_back
+    name: reader-net-back
   front-tier:
-    name: reader_net_front
+    name: reader-net-front

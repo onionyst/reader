@@ -8,17 +8,15 @@ import (
 
 // Tag tag
 type Tag struct {
-	ID int64
+	ID int64 `gorm:"primaryKey"`
 
-	Name string `gorm:"type:varchar(63);unique;not null"`
+	Name string `gorm:"not null;uniqueIndex:uidx_tags_name"`
 
 	Entries []*Entry `gorm:"many2many:entry_tags"`
 }
 
 // AddTag adds tag for name
 func AddTag(name string) (int64, error) {
-	// TODO: check name length
-
 	tag := &Tag{Name: name}
 	if res := db.Create(&tag); res.Error != nil {
 		return 0, res.Error

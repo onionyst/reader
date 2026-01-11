@@ -10,16 +10,16 @@ import (
 
 // Feed feed
 type Feed struct {
-	ID int64
+	ID int64 `gorm:"primaryKey"`
 
-	Name     string `gorm:"type:varchar(255);not null;index"`
-	Priority int8   `gorm:"default:10;not null;index"`
-	URL      string `gorm:"type:varchar(255);not null;unique"`
-	Website  string `gorm:"type:varchar(255)"`
-	IconURL  string `gorm:"type:varchar(255)"`
+	Name     string `gorm:"not null"`
+	Priority int8   `gorm:"not null;default:10"`
+	URL      string `gorm:"not null;uniqueIndex:uidx_feeds_url"`
+	Website  string `gorm:"not null"`
+	IconURL  string `gorm:"not null"`
 
 	Category   *Category
-	CategoryID int64
+	CategoryID int64 `gorm:"not null;index"`
 	Entries    []*Entry
 }
 

@@ -11,17 +11,18 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/sirupsen/logrus"
+	"gorm.io/gorm"
 
-	"reader/internal/app/reader/db"
 	"reader/internal/app/reader/feeds"
-	"reader/internal/app/reader/routes"
+	readerModels "reader/internal/app/reader/models"
+	readerRoutes "reader/internal/app/reader/routes"
+	"reader/internal/pkg/db"
 	"reader/internal/pkg/logging"
 	"reader/internal/pkg/utils"
 )
 
 const (
 	httpAddr        = "0.0.0.0:3000"
-	serviceTimeout  = 15 // seconds
 	shutdownTimeout = 10 * time.Second
 )
 
@@ -33,26 +34,34 @@ func main() {
 		panic(err)
 	}
 
+	// setup logger
 	log := logging.Setup()
 	log.Info("OnionReader")
 
-	services := []string{db.ServiceString()}
-	utils.Wait(services, serviceTimeout)
+	// setup database
+	conns, err := db.Setup()
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer conns.Close()
 
-	pg := db.SetupDatabase()
-	defer db.CloseDatabase(pg)
+	if err := setupModels(conns.Main); err != nil {
+		log.Fatal(err)
+	}
 
+	// emit workers
 	_, stopFeeds := feeds.PollFeeds(ctx, log)
 	defer stopFeeds()
 
-	router := setupRouter(log)
+	// setup routes
+	router := setupRoutes(log)
 
+	// launch server
 	srv := &http.Server{
 		Addr:              httpAddr,
 		Handler:           router,
 		ReadHeaderTimeout: 10 * time.Second,
 	}
-
 	go func() {
 		log.WithField("addr", httpAddr).Info("http server starting")
 		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
@@ -71,15 +80,21 @@ func main() {
 	} else {
 		log.Info("http server stopped")
 	}
-
 }
 
-func setupRouter(log *logrus.Logger) *gin.Engine {
+func setupModels(db *gorm.DB) error {
+	if err := readerModels.Register(db); err != nil {
+		return err
+	}
+	return nil
+}
+
+func setupRoutes(log *logrus.Logger) *gin.Engine {
 	router := gin.New()
 	router.Use(gin.LoggerWithWriter(gin.DefaultWriter, "/healthz"))
 	router.Use(logging.LogError(log))
 	router.Use(gin.Recovery())
 
-	routes.SetupRoutes(router)
+	readerRoutes.SetupRoutes(router)
 	return router
 }

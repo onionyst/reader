@@ -2,7 +2,6 @@ package models
 
 import (
 	"database/sql"
-	"errors"
 	"time"
 
 	"gorm.io/gorm"
@@ -13,19 +12,19 @@ import (
 
 // Entry entry
 type Entry struct {
-	ID int64
+	ID int64 `gorm:"primaryKey"`
 
-	Author   string    `gorm:"type:varchar(255)"`
-	Content  string    `gorm:"type:text"`
-	Date     time.Time `gorm:"type:timestamp with time zone"`
-	Favorite bool      `gorm:"default:false;index"`
-	GUID     string    `gorm:"type:varchar(760);not null;index:feed_id_guid,unique"`
-	Link     string    `gorm:"type:varchar(1023);not null"`
-	Read     bool      `gorm:"default:false;index;index:idx_entries_feed_read"`
-	Title    string    `gorm:"type:varchar(255);not null"`
+	Author   string    `gorm:"not null"`
+	Content  string    `gorm:"not null"`
+	Date     time.Time `gorm:"not null"`
+	Favorite bool      `gorm:"not null;default:false"`
+	GUID     string    `gorm:"not null;uniqueIndex:uidx_entries_feed_guid,priority:2"`
+	Link     string    `gorm:"not null"`
+	Read     bool      `gorm:"not null;default:false"`
+	Title    string    `gorm:"not null"`
 
 	Feed   *Feed
-	FeedID int64  `gorm:"index:idx_entries_feed_read;index:feed_id_guid,unique"`
+	FeedID int64  `gorm:"not null;uniqueIndex:uidx_entries_feed_guid,priority:1"`
 	Tags   []*Tag `gorm:"many2many:entry_tags"`
 }
 
@@ -143,19 +142,6 @@ func GetLatestFeedDate(feedID int64) (time.Time, error) {
 	}
 
 	return nt.Time.UTC(), nil
-}
-
-// IsEntryExist returns true if entry with guid exists
-func IsEntryExist(guid string) (bool, error) {
-	var entry *Entry
-	if res := db.Where(&Entry{GUID: guid}).First(&entry); res.Error != nil {
-		if errors.Is(res.Error, gorm.ErrRecordNotFound) {
-			return false, nil
-		}
-		return false, res.Error
-	}
-
-	return true, nil
 }
 
 // ListEntryIDs list Entry IDs with conditions

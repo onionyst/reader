@@ -8,9 +8,9 @@ import (
 
 // Category category
 type Category struct {
-	ID int64
+	ID int64 `gorm:"primaryKey"`
 
-	Name string `gorm:"type:varchar(255);not null;unique"`
+	Name string `gorm:"not null;uniqueIndex:uidx_categories_name"`
 
 	Feeds []*Feed
 }

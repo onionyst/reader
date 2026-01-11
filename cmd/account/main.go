@@ -4,13 +4,15 @@ import (
 	"bufio"
 	"errors"
 	"fmt"
+	"log"
 	"os"
 	"strings"
 
 	"golang.org/x/term"
+	"gorm.io/gorm"
 
-	"reader/internal/app/reader/db"
-	"reader/internal/app/reader/models"
+	readerModels "reader/internal/app/reader/models"
+	"reader/internal/pkg/db"
 	"reader/internal/pkg/utils"
 )
 
@@ -50,18 +52,23 @@ func addAccount(email, password string) error {
 	if err != nil {
 		return err
 	}
-	_, err = models.AddUser(email, hashed)
+	_, err = readerModels.AddUser(email, hashed)
 	return err
 }
 
 func main() {
 	fmt.Println("OnionReader Account Manager")
 
-	services := []string{db.ServiceString()}
-	utils.Wait(services, serviceTimeout)
+	// setup database
+	conns, err := db.Setup()
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer conns.Close()
 
-	pg := db.SetupDatabase()
-	defer db.CloseDatabase(pg)
+	if err := setupModels(conns.Main); err != nil {
+		log.Fatal(err)
+	}
 
 	fmt.Println("Add account: please input email and password.")
 	email, password, err := readEmailAndPassword()
@@ -76,4 +83,11 @@ func main() {
 	}
 
 	fmt.Printf("Successfully added account for %s\n", email)
+}
+
+func setupModels(db *gorm.DB) error {
+	if err := readerModels.Register(db); err != nil {
+		return err
+	}
+	return nil
 }

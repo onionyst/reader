@@ -8,10 +8,10 @@ import (
 
 // User user
 type User struct {
-	ID int64
+	ID int64 `gorm:"primaryKey"`
 
-	Email    string `gorm:"type:varchar(255);not null;unique"`
-	Password string `gorm:"type:varchar(255);not null"` // hashed result
+	Email    string `gorm:"not null;uniqueIndex:uidx_users_email"`
+	Password string `gorm:"not null"` // hashed
 }
 
 // AddUser adds user for email and hashed password

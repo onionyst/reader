@@ -1,0 +1,9 @@
+# syntax=docker/dockerfile:1
+
+FROM arigaio/atlas:latest
+WORKDIR /migrations
+
+COPY atlas.hcl db/migrations/ /migrations/
+
+ENTRYPOINT ["/atlas"]
+CMD ["migrate", "apply", "--env", "deploy", "-c", "file:///migrations/atlas.hcl"]
