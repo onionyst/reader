@@ -35,6 +35,8 @@ jobs:
         uses: docker/metadata-action@v5
         with:
           images: ${{ env.APP_IMAGE_NAME }}
+          flavor: |
+            latest=false
           tags: |
             type=raw,value=latest
             type=sha,format=short
@@ -50,16 +52,18 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
           provenance: false
-      - name: Docker meta (migrate)
+      - name: Docker meta (migration)
         id: meta_migrate
         uses: docker/metadata-action@v5
         with:
           images: ${{ env.MIGRATE_IMAGE_NAME }}
+          flavor: |
+            latest=false
           tags: |
             type=raw,value=migration
             type=sha,format=short,prefix=migration-
-            type=semver,pattern={{version}},prefix=migration
-      - name: Build and push (App)
+            type=semver,pattern={{version}},prefix=migration-
+      - name: Build and push (migration)
         uses: docker/build-push-action@v6
         with:
           context: .

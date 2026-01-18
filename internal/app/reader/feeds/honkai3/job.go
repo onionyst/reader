@@ -49,13 +49,6 @@ type apiItem struct {
 	Ext       string `json:"sExt"`
 }
 
-var (
-	extImageTemplate = `<p style="white-space: pre-wrap; min-height: 1.5em;">` +
-		`<img src="%s" href="" data-origin-width="" ` +
-		`style="width:100%%;border:none;vertical-align:middle;">` +
-		`</p>`
-)
-
 func (a apiItem) extImage(channel int) string {
 	if a.Ext == "" {
 		return ""
@@ -75,7 +68,7 @@ func (a apiItem) extImage(channel int) string {
 		return ""
 	}
 
-	return fmt.Sprintf(extImageTemplate, html.EscapeString(imgs[0].URL))
+	return fmt.Sprintf(common.ImageTemplate, html.EscapeString(imgs[0].URL))
 }
 
 func (a apiItem) gUID() string {
@@ -111,9 +104,9 @@ func (j *Job) Run(ctx context.Context, d common.Deps) error {
 
 	g, ctx := errgroup.WithContext(ctx)
 	g.SetLimit(len(channels))
-	for _, cat := range channels {
+	for _, channel := range channels {
 		g.Go(func() error {
-			return j.fetchChannel(ctx, cat)
+			return j.fetchChannel(ctx, channel)
 		})
 	}
 
@@ -158,9 +151,9 @@ func (j *Job) fetchChannel(ctx context.Context, channel int) error {
 		oldestDate := time.Time{}
 		hasOldest := false
 
-		guids := make([]string, 0, len(resp.Data.List))
-		for _, item := range resp.Data.List {
-			guids = append(guids, item.gUID())
+		guids := make([]string, len(resp.Data.List))
+		for idx, item := range resp.Data.List {
+			guids[idx] = item.gUID()
 
 			date := item.time()
 			if !hasOldest || date.Before(oldestDate) {

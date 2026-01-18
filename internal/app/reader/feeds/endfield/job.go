@@ -1,4 +1,4 @@
-package genshin
+package endfield
 
 import (
 	"context"
@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"golang.org/x/sync/errgroup"
@@ -20,55 +21,36 @@ import (
 
 const (
 	feedCategory = common.CategoryGame
-	feedName     = "Genshin Impact"
+	feedName     = "Arknights: Endfield"
 	feedPriority = int8(10)
-	feedURL      = "https://api-takumi-static.mihoyo.com/content_v2_user/app/16471662a82d418a/getContentList"
-	feedWebsite  = "https://ys.mihoyo.com/main/news"
-	feedIcon     = "https://ys.mihoyo.com/main/favicon.ico"
+	feedURL      = "https://web-news.hypergryph.com/api/bulletin"
+	feedWebsite  = "https://endfield.hypergryph.com/news"
+	feedIcon     = "https://web.hycdn.cn/favicon.ico"
 
 	maxWebpageConcurrency = 4
-	pageSize              = 100
+	pageSize              = 20
 )
 
-var channels = []int{720, 721, 722}
+var channels = []string{"notices", "events", "news"}
 
 type apiResp struct {
+	Code int `json:"code"`
 	Data struct {
 		List  []apiItem `json:"list"`
-		Total int       `json:"iTotal"`
+		Total int       `json:"total"`
 	} `json:"data"`
-	RetCode int `json:"retcode"`
 }
 
 type apiItem struct {
-	ID        int    `json:"iInfoId"`
-	Title     string `json:"sTitle"`
-	Author    string `json:"sAuthor"`
-	StartTime string `json:"dtStartTime"`
-	Content   string `json:"sContent"`
-	Ext       string `json:"sExt"`
+	ID          string `json:"cid"`
+	Title       string `json:"title"`
+	Author      string `json:"author"`
+	DisplayTime int64  `json:"displayTime"`
+	Cover       string `json:"cover"`
 }
 
-func (a apiItem) extImage(channel int) string {
-	if a.Ext == "" {
-		return ""
-	}
-
-	var ext map[string][]struct {
-		Name string `json:"name"`
-		URL  string `json:"url"`
-	}
-	if err := json.Unmarshal([]byte(a.Ext), &ext); err != nil {
-		return ""
-	}
-
-	key := fmt.Sprintf("%d_1", channel)
-	imgs := ext[key]
-	if len(imgs) == 0 || imgs[0].URL == "" {
-		return ""
-	}
-
-	return fmt.Sprintf(common.ImageTemplate, html.EscapeString(imgs[0].URL))
+func (a apiItem) extImage() string {
+	return fmt.Sprintf(common.ImageTemplate, html.EscapeString(a.Cover))
 }
 
 func (a apiItem) gUID() string {
@@ -76,12 +58,11 @@ func (a apiItem) gUID() string {
 }
 
 func (a apiItem) link() string {
-	return fmt.Sprintf("%s/detail/%d", feedWebsite, a.ID)
+	return fmt.Sprintf("%s/%s", feedWebsite, a.ID)
 }
 
 func (a apiItem) time() time.Time {
-	t, _ := time.ParseInLocation(time.DateTime, a.StartTime, utils.Beijing)
-	return t.UTC()
+	return time.Unix(a.DisplayTime, 0).UTC()
 }
 
 type Job struct {
@@ -113,25 +94,54 @@ func (j *Job) Run(ctx context.Context, d common.Deps) error {
 	return g.Wait()
 }
 
-func (j *Job) buildEntriesWithContent(channel int, items []apiItem) []models.Entry {
+func (j *Job) buildEntriesWithContent(ctx context.Context, items []apiItem) ([]models.Entry, error) {
 	entries := make([]models.Entry, len(items))
 
+	g := new(errgroup.Group)
+	g.SetLimit(maxWebpageConcurrency)
+
+	var firstErr error
+	var once sync.Once
+
 	for idx, item := range items {
-		entries[idx] = models.Entry{
-			Author:  item.Author,
-			Content: strings.TrimSpace(utils.SanitizeHTML(item.extImage(channel) + item.Content)),
-			Date:    item.time(),
-			GUID:    item.gUID(),
-			Link:    item.link(),
-			Title:   item.Title,
-			FeedID:  j.feedID,
+		g.Go(func() error {
+			link := item.link()
+			content, err := common.FetchArticleHTML(ctx, j.deps, link, contentSelector)
+			if err != nil {
+				once.Do(func() {
+					firstErr = err
+				})
+				return nil
+			}
+
+			entries[idx] = models.Entry{
+				Author:  item.Author,
+				Content: strings.TrimSpace(item.extImage() + content),
+				Date:    item.time(),
+				GUID:    item.gUID(),
+				Link:    link,
+				Title:   item.Title,
+				FeedID:  j.feedID,
+			}
+			return nil
+		})
+	}
+
+	_ = g.Wait()
+
+	out := make([]models.Entry, 0, len(entries))
+	for _, entry := range entries {
+		if entry.GUID != "" {
+			out = append(out, entry)
 		}
 	}
 
-	return entries
+	return out, firstErr
 }
 
-func (j *Job) fetchChannel(ctx context.Context, channel int) error {
+const contentSelector = `div[class*="NoticeDetail_contentContainer"] > div:nth-child(4)`
+
+func (j *Job) fetchChannel(ctx context.Context, channel string) error {
 	for page := 1; ; page++ {
 		if err := ctx.Err(); err != nil {
 			return err
@@ -139,10 +149,10 @@ func (j *Job) fetchChannel(ctx context.Context, channel int) error {
 
 		resp, err := j.fetchListPage(ctx, channel, page)
 		if err != nil {
-			return fmt.Errorf("%d page=%d: %w", channel, page, err)
+			return fmt.Errorf("%s page=%d: %w", channel, page, err)
 		}
-		if resp.RetCode != 0 {
-			return fmt.Errorf("%d page=%d: api code=%d", channel, page, resp.RetCode)
+		if resp.Code != 0 {
+			return fmt.Errorf("%s page=%d: api code=%d", channel, page, resp.Code)
 		}
 		if len(resp.Data.List) == 0 {
 			return nil
@@ -164,7 +174,7 @@ func (j *Job) fetchChannel(ctx context.Context, channel int) error {
 
 		exists, err := j.deps.Repo.ExistingGUIDsForFeed(ctx, j.feedID, guids)
 		if err != nil {
-			return fmt.Errorf("%d page=%d: exists query: %w", channel, page, err)
+			return fmt.Errorf("%s page=%d: exists query: %w", channel, page, err)
 		}
 		existsSet := utils.ToSet(exists)
 
@@ -176,9 +186,15 @@ func (j *Job) fetchChannel(ctx context.Context, channel int) error {
 		}
 
 		if len(newItems) > 0 {
-			entries := j.buildEntriesWithContent(channel, newItems)
+			entries, err := j.buildEntriesWithContent(ctx, newItems)
+			if err != nil {
+				if len(entries) > 0 {
+					_ = j.deps.Repo.AddEntries(ctx, entries)
+				}
+				return fmt.Errorf("%s page=%d: build content: %w", channel, page, err)
+			}
 			if err := j.deps.Repo.AddEntries(ctx, entries); err != nil {
-				return fmt.Errorf("%d page=%d: insert: %w", channel, page, err)
+				return fmt.Errorf("%s page=%d: insert: %w", channel, page, err)
 			}
 		}
 
@@ -191,17 +207,18 @@ func (j *Job) fetchChannel(ctx context.Context, channel int) error {
 	}
 }
 
-func (j *Job) fetchListPage(ctx context.Context, channel int, page int) (*apiResp, error) {
+func (j *Job) fetchListPage(ctx context.Context, channel string, page int) (*apiResp, error) {
 	u, err := url.Parse(feedURL)
 	if err != nil {
 		return nil, err
 	}
 
 	q := u.Query()
-	q.Set("sLangKey", "zh-cn")
-	q.Set("iChanId", strconv.Itoa(channel))
-	q.Set("iPageSize", strconv.Itoa(pageSize))
-	q.Set("iPage", strconv.Itoa(page))
+	q.Set("lang", "zh-cn")
+	q.Set("code", "endfield_web")
+	q.Set("tabs[]", channel)
+	q.Set("pageSize", strconv.Itoa(pageSize))
+	q.Set("page", strconv.Itoa(page))
 	u.RawQuery = q.Encode()
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)

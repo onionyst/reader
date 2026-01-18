@@ -7,11 +7,9 @@ import (
 	"net/http"
 	"net/url"
 	"strconv"
-	"strings"
 	"sync"
 	"time"
 
-	"github.com/PuerkitoBio/goquery"
 	"golang.org/x/sync/errgroup"
 
 	"reader/internal/app/reader/feeds/common"
@@ -80,9 +78,9 @@ func (j *Job) Run(ctx context.Context, d common.Deps) error {
 
 	g, ctx := errgroup.WithContext(ctx)
 	g.SetLimit(len(categories))
-	for _, cat := range categories {
+	for _, category := range categories {
 		g.Go(func() error {
-			return j.fetchCategory(ctx, cat)
+			return j.fetchCategory(ctx, category)
 		})
 	}
 
@@ -101,7 +99,7 @@ func (j *Job) buildEntriesWithContent(ctx context.Context, items []apiItem) ([]m
 	for idx, item := range items {
 		g.Go(func() error {
 			link := item.link()
-			html, err := j.fetchArticle(ctx, link)
+			html, err := common.FetchArticleHTML(ctx, j.deps, link, contentSelector)
 			if err != nil {
 				once.Do(func() {
 					firstErr = err
@@ -134,47 +132,7 @@ func (j *Job) buildEntriesWithContent(ctx context.Context, items []apiItem) ([]m
 	return out, firstErr
 }
 
-const (
-	contentSelector = `div > div > div > div > div > div > div:nth-child(4) > div > div`
-)
-
-func (j *Job) fetchArticle(ctx context.Context, pageURL string) (string, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, pageURL, nil)
-	if err != nil {
-		return "", err
-	}
-	req.Header.Set("Accept", "text/html")
-
-	resp, release, err := j.deps.Do(ctx, req)
-	if err != nil {
-		return "", err
-	}
-	defer release()
-	defer resp.Body.Close()
-
-	if resp.StatusCode != 200 {
-		return "", fmt.Errorf("GET %s: %s", pageURL, resp.Status)
-	}
-
-	doc, err := goquery.NewDocumentFromReader(resp.Body)
-	if err != nil {
-		return "", err
-	}
-
-	sel := doc.Find(contentSelector).First()
-
-	html, err := sel.Html()
-	if err != nil {
-		return "", err
-	}
-
-	html = strings.TrimSpace(utils.SanitizeHTML(html))
-	if html == "" {
-		return "", fmt.Errorf("empty content: %s", pageURL)
-	}
-
-	return html, nil
-}
+const contentSelector = `div > div > div > div > div > div > div:nth-child(4) > div > div`
 
 func (j *Job) fetchCategory(ctx context.Context, category string) error {
 	for page := 1; ; page++ {
@@ -196,9 +154,9 @@ func (j *Job) fetchCategory(ctx context.Context, category string) error {
 		oldestDate := time.Time{}
 		hasOldest := false
 
-		guids := make([]string, 0, len(resp.Data.List))
-		for _, item := range resp.Data.List {
-			guids = append(guids, item.gUID())
+		guids := make([]string, len(resp.Data.List))
+		for idx, item := range resp.Data.List {
+			guids[idx] = item.gUID()
 
 			date := item.time()
 			if !hasOldest || date.Before(oldestDate) {
