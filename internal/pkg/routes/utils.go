@@ -6,6 +6,6 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-func healthz(c *gin.Context) {
+func Healthz(c *gin.Context) {
 	c.Status(http.StatusOK)
 }

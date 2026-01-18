@@ -1,18 +1,18 @@
 package utils
 
 import (
+	"fmt"
+	"os"
 	"time"
 )
 
-// time locations
-var (
-	Beijing *time.Location
-)
+var Beijing *time.Location
 
-// SetupTimeLocations setups time locations
-func SetupTimeLocations() (err error) {
+// SetupTimeLocations initializes timezone locations.
+func SetupTimeLocations() {
+	var err error
 	if Beijing, err = time.LoadLocation("Asia/Shanghai"); err != nil {
-		return
+		fmt.Fprintf(os.Stderr, "FATAL: tzdata missing, cannot load Asia/Shanghai: %v\n", err)
+		os.Exit(1)
 	}
-	return nil
 }

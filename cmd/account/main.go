@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"context"
 	"errors"
 	"fmt"
 	"log"
@@ -9,16 +10,41 @@ import (
 	"strings"
 
 	"golang.org/x/term"
-	"gorm.io/gorm"
 
 	readerModels "reader/internal/app/reader/models"
 	"reader/internal/pkg/db"
 	"reader/internal/pkg/utils"
 )
 
-const (
-	serviceTimeout = 15 // seconds
-)
+func main() {
+	fmt.Println("OnionReader Account Manager")
+
+	conns, err := db.Setup()
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer conns.Close()
+
+	if err := readerModels.Register(conns.Main); err != nil {
+		log.Fatal(err)
+	}
+
+	repo := readerModels.NewRepo(conns.Main)
+
+	fmt.Println("Add account: please input email and password.")
+	email, password, err := readEmailAndPassword()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "Input error:", err)
+		os.Exit(2)
+	}
+
+	if err := addAccount(context.Background(), repo, email, password); err != nil {
+		fmt.Fprintln(os.Stderr, "Failed to add account:", err)
+		os.Exit(1)
+	}
+
+	fmt.Printf("Successfully added account for %s\n", email)
+}
 
 func readEmailAndPassword() (string, string, error) {
 	reader := bufio.NewReader(os.Stdin)
@@ -47,47 +73,11 @@ func readEmailAndPassword() (string, string, error) {
 	return email, password, nil
 }
 
-func addAccount(email, password string) error {
+func addAccount(ctx context.Context, repo *readerModels.Repo, email, password string) error {
 	hashed, err := utils.HashPassword(password)
 	if err != nil {
 		return err
 	}
-	_, err = readerModels.AddUser(email, hashed)
+	_, err = repo.AddUser(ctx, email, hashed)
 	return err
-}
-
-func main() {
-	fmt.Println("OnionReader Account Manager")
-
-	// setup database
-	conns, err := db.Setup()
-	if err != nil {
-		log.Fatal(err)
-	}
-	defer conns.Close()
-
-	if err := setupModels(conns.Main); err != nil {
-		log.Fatal(err)
-	}
-
-	fmt.Println("Add account: please input email and password.")
-	email, password, err := readEmailAndPassword()
-	if err != nil {
-		fmt.Fprintln(os.Stderr, "Input error:", err)
-		os.Exit(2)
-	}
-
-	if err := addAccount(email, password); err != nil {
-		fmt.Fprintln(os.Stderr, "Failed to add account:", err)
-		os.Exit(1)
-	}
-
-	fmt.Printf("Successfully added account for %s\n", email)
-}
-
-func setupModels(db *gorm.DB) error {
-	if err := readerModels.Register(db); err != nil {
-		return err
-	}
-	return nil
 }

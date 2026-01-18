@@ -1,6 +1,8 @@
 package common
 
 import (
+	"context"
+
 	"reader/internal/app/reader/models"
 )
 
@@ -10,26 +12,26 @@ const (
 	CategoryGame Category = "Games"
 )
 
-// RegisterFeed registers feed under category
-func RegisterFeed(category Category, name string, priority int8, url, website, iconURL string) (int64, error) {
-	categoryID, err := models.GetCategoryIDForName(string(category))
+// RegisterFeed ensures a category and feed exist, returning the feed ID.
+func RegisterFeed(ctx context.Context, repo *models.Repo, category Category, name string, priority int8, url, website, iconURL string) (int64, error) {
+	categoryID, found, err := repo.GetCategoryIDForName(ctx, string(category))
 	if err != nil {
 		return 0, err
 	}
 
-	if categoryID == -1 {
-		if categoryID, err = models.AddCategory(string(category)); err != nil {
+	if !found {
+		if categoryID, err = repo.AddCategory(ctx, string(category)); err != nil {
 			return 0, err
 		}
 	}
 
-	feedID, err := models.GetFeedIDForURL(url)
+	feedID, found, err := repo.GetFeedIDForURL(ctx, url)
 	if err != nil {
 		return 0, err
 	}
 
-	if feedID == -1 {
-		if feedID, err = models.AddFeed(name, priority, url, website, iconURL, categoryID); err != nil {
+	if !found {
+		if feedID, err = repo.AddFeed(ctx, name, priority, url, website, iconURL, categoryID); err != nil {
 			return 0, err
 		}
 	}

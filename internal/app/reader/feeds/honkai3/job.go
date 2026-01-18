@@ -103,11 +103,11 @@ func (j *Job) Name() string {
 }
 
 func (j *Job) Run(ctx context.Context, d common.Deps) error {
-	if err := j.init(); err != nil {
+	j.deps = d
+
+	if err := j.init(ctx); err != nil {
 		return err
 	}
-
-	j.deps = d
 
 	g, ctx := errgroup.WithContext(ctx)
 	g.SetLimit(len(channels))
@@ -169,21 +169,22 @@ func (j *Job) fetchChannel(ctx context.Context, channel int) error {
 			}
 		}
 
-		exists, err := models.ExistingGUIDsForFeed(j.feedID, guids)
+		exists, err := j.deps.Repo.ExistingGUIDsForFeed(ctx, j.feedID, guids)
 		if err != nil {
 			return fmt.Errorf("%d page=%d: exists query: %w", channel, page, err)
 		}
+		existsSet := utils.ToSet(exists)
 
 		newItems := make([]apiItem, 0, len(resp.Data.List))
 		for _, item := range resp.Data.List {
-			if _, ok := exists[item.gUID()]; !ok {
+			if _, ok := existsSet[item.gUID()]; !ok {
 				newItems = append(newItems, item)
 			}
 		}
 
 		if len(newItems) > 0 {
 			entries := j.buildEntriesWithContent(channel, newItems)
-			if err := models.AddEntries(entries); err != nil {
+			if err := j.deps.Repo.AddEntries(ctx, entries); err != nil {
 				return fmt.Errorf("%d page=%d: insert: %w", channel, page, err)
 			}
 		}
@@ -235,15 +236,15 @@ func (j *Job) fetchListPage(ctx context.Context, channel int, page int) (*apiRes
 	return &out, nil
 }
 
-func (j *Job) init() error {
+func (j *Job) init(ctx context.Context) error {
 	var err error
 	if j.feedID == 0 {
-		if j.feedID, err = common.RegisterFeed(feedCategory, feedName, feedPriority, feedURL, feedWebsite, feedIcon); err != nil {
+		if j.feedID, err = common.RegisterFeed(ctx, j.deps.Repo, feedCategory, feedName, feedPriority, feedURL, feedWebsite, feedIcon); err != nil {
 			return err
 		}
 	}
 
-	if j.cutoff, err = models.GetLatestFeedDate(j.feedID); err != nil {
+	if j.cutoff, err = j.deps.Repo.GetLatestFeedDate(ctx, j.feedID); err != nil {
 		return err
 	}
 

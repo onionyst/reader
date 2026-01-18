@@ -5,7 +5,7 @@ import (
 	"strings"
 )
 
-// AllDigits reports string non-empty and consists only of ASCII digits
+// AllDigits reports whether s is non-empty and contains only ASCII digits.
 func AllDigits(s string) bool {
 	if s == "" {
 		return false
@@ -18,7 +18,7 @@ func AllDigits(s string) bool {
 	return true
 }
 
-// PadString pad string with single character to reach length
+// PadString pads s with pad bytes to length n.
 func PadString(s string, pad byte, n int, left bool) string {
 	if pad == 0 || n <= 0 || len(s) >= n {
 		return s
@@ -30,7 +30,7 @@ func PadString(s string, pad byte, n int, left bool) string {
 	return s + padding
 }
 
-// UnescapeUnicode un-escapes unicode string
+// UnescapeUnicode decodes \uXXXX sequences in s.
 func UnescapeUnicode(s string) (string, error) {
 	s, err := strconv.Unquote(strings.ReplaceAll(strconv.Quote(s), `\\u`, `\u`))
 	if err != nil {

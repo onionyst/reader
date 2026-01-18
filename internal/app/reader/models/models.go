@@ -1,14 +1,34 @@
 package models
 
 import (
+	"context"
+
 	"gorm.io/gorm"
 )
 
-var (
+type Repo struct {
 	db *gorm.DB
-)
+}
 
-// Models returns all models
+func (r *Repo) Tx(ctx context.Context, fn func(tx *Repo) error) error {
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		return fn(r.withDB(tx))
+	})
+}
+
+func (r *Repo) withDB(db *gorm.DB) *Repo {
+	return &Repo{
+		db: db,
+	}
+}
+
+func NewRepo(db *gorm.DB) *Repo {
+	return &Repo{
+		db: db,
+	}
+}
+
+// Models returns all model types for GORM.
 func Models() []any {
 	return []any{
 		&Category{},
@@ -20,12 +40,12 @@ func Models() []any {
 	}
 }
 
-// Register adds external indexes to database
-func Register(db *gorm.DB) error {
-	if err := db.SetupJoinTable(&Entry{}, "Tags", &EntryTag{}); err != nil {
+// Register configures GORM join tables.
+func Register(pg *gorm.DB) error {
+	if err := pg.SetupJoinTable(&Entry{}, "Tags", &EntryTag{}); err != nil {
 		return err
 	}
-	if err := db.SetupJoinTable(&Tag{}, "Entries", &EntryTag{}); err != nil {
+	if err := pg.SetupJoinTable(&Tag{}, "Entries", &EntryTag{}); err != nil {
 		return err
 	}
 	return nil
