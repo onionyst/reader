@@ -7,11 +7,13 @@ import (
 	"github.com/sirupsen/logrus"
 	"golang.org/x/sync/semaphore"
 
+	"reader/internal/app/reader/models"
 	"reader/internal/pkg/downloader"
 )
 
 type Deps struct {
 	HTTP downloader.Doer
+	Repo *models.Repo
 
 	HTTPPool *semaphore.Weighted
 	Log      *logrus.Logger

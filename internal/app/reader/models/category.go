@@ -1,49 +1,60 @@
 package models
 
 import (
+	"context"
 	"errors"
 
 	"gorm.io/gorm"
+
+	"reader/internal/pkg/db/postgres"
 )
 
-// Category category
-type Category struct {
-	ID int64
+var ErrCategoriesNameAlreadyExists = errors.New("name already exists")
 
-	Name string `gorm:"type:varchar(255);not null;unique"`
+const (
+	constraintCategoriesName = "uidx_categories_name"
+)
+
+var categoriesUniqueConstraintErr = map[string]error{
+	constraintCategoriesName: ErrCategoriesNameAlreadyExists,
+}
+
+type Category struct {
+	ID int64 `gorm:"primaryKey"`
+
+	Name string `gorm:"not null;uniqueIndex:uidx_categories_name"`
 
 	Feeds []*Feed
 }
 
-// AddCategory adds category
-func AddCategory(name string) (int64, error) {
-	category := &Category{Name: name}
-	if res := db.Create(&category); res.Error != nil {
-		return 0, res.Error
+// AddCategory creates a category.
+func (r *Repo) AddCategory(ctx context.Context, name string) (int64, error) {
+	category := &Category{
+		Name: name,
 	}
-
+	if err := r.db.WithContext(ctx).Create(category).Error; err != nil {
+		return 0, postgres.MapUniqueConstraint(err, categoriesUniqueConstraintErr)
+	}
 	return category.ID, nil
 }
 
-// GetCategoryIDForName gets the category ID for given name, -1 for not found
-func GetCategoryIDForName(name string) (int64, error) {
-	var category *Category
-	if res := db.Where(&Category{Name: name}).First(&category); res.Error != nil {
-		if errors.Is(res.Error, gorm.ErrRecordNotFound) {
-			return -1, nil
+// GetCategoryIDForName returns the category ID for a name.
+func (r *Repo) GetCategoryIDForName(ctx context.Context, name string) (int64, bool, error) {
+	var category Category
+	if err := r.db.WithContext(ctx).Select("id").Where("name = ?", name).Take(&category).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return 0, false, nil
 		}
-		return 0, res.Error
+		return 0, false, err
 	}
-
-	return category.ID, nil
+	return category.ID, true, nil
 }
 
-// ListAllCategoriesWithFeeds gets all categories with feeds data
-func ListAllCategoriesWithFeeds() ([]*Category, error) {
+// ListAllCategoriesWithFeeds returns all categories with feeds preloaded.
+func (r *Repo) ListAllCategoriesWithFeeds(ctx context.Context) ([]*Category, error) {
 	var categories []*Category
-	if res := db.Preload("Feeds").Find(&categories); res.Error != nil {
-		return nil, res.Error
+	if err := r.db.WithContext(ctx).Preload("Feeds").Find(&categories).Error; err != nil {
+		return nil, err
 	}
-
 	return categories, nil
 }

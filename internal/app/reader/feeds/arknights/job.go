@@ -7,11 +7,9 @@ import (
 	"net/http"
 	"net/url"
 	"strconv"
-	"strings"
 	"sync"
 	"time"
 
-	"github.com/PuerkitoBio/goquery"
 	"golang.org/x/sync/errgroup"
 
 	"reader/internal/app/reader/feeds/common"
@@ -72,17 +70,17 @@ func (j *Job) Name() string {
 }
 
 func (j *Job) Run(ctx context.Context, d common.Deps) error {
-	if err := j.init(); err != nil {
+	j.deps = d
+
+	if err := j.init(ctx); err != nil {
 		return err
 	}
 
-	j.deps = d
-
 	g, ctx := errgroup.WithContext(ctx)
 	g.SetLimit(len(categories))
-	for _, cat := range categories {
+	for _, category := range categories {
 		g.Go(func() error {
-			return j.fetchCategory(ctx, cat)
+			return j.fetchCategory(ctx, category)
 		})
 	}
 
@@ -101,7 +99,7 @@ func (j *Job) buildEntriesWithContent(ctx context.Context, items []apiItem) ([]m
 	for idx, item := range items {
 		g.Go(func() error {
 			link := item.link()
-			html, err := j.fetchArticle(ctx, link)
+			html, err := common.FetchArticleHTML(ctx, j.deps, link, contentSelector)
 			if err != nil {
 				once.Do(func() {
 					firstErr = err
@@ -134,47 +132,7 @@ func (j *Job) buildEntriesWithContent(ctx context.Context, items []apiItem) ([]m
 	return out, firstErr
 }
 
-const (
-	contentSelector = `div > div > div > div > div > div > div:nth-child(4) > div > div`
-)
-
-func (j *Job) fetchArticle(ctx context.Context, pageURL string) (string, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, pageURL, nil)
-	if err != nil {
-		return "", err
-	}
-	req.Header.Set("Accept", "text/html")
-
-	resp, release, err := j.deps.Do(ctx, req)
-	if err != nil {
-		return "", err
-	}
-	defer release()
-	defer resp.Body.Close()
-
-	if resp.StatusCode != 200 {
-		return "", fmt.Errorf("GET %s: %s", pageURL, resp.Status)
-	}
-
-	doc, err := goquery.NewDocumentFromReader(resp.Body)
-	if err != nil {
-		return "", err
-	}
-
-	sel := doc.Find(contentSelector).First()
-
-	html, err := sel.Html()
-	if err != nil {
-		return "", err
-	}
-
-	html = strings.TrimSpace(utils.SanitizeHTML(html))
-	if html == "" {
-		return "", fmt.Errorf("empty content: %s", pageURL)
-	}
-
-	return html, nil
-}
+const contentSelector = `div > div > div > div > div > div > div:nth-child(4) > div > div`
 
 func (j *Job) fetchCategory(ctx context.Context, category string) error {
 	for page := 1; ; page++ {
@@ -196,9 +154,9 @@ func (j *Job) fetchCategory(ctx context.Context, category string) error {
 		oldestDate := time.Time{}
 		hasOldest := false
 
-		guids := make([]string, 0, len(resp.Data.List))
-		for _, item := range resp.Data.List {
-			guids = append(guids, item.gUID())
+		guids := make([]string, len(resp.Data.List))
+		for idx, item := range resp.Data.List {
+			guids[idx] = item.gUID()
 
 			date := item.time()
 			if !hasOldest || date.Before(oldestDate) {
@@ -207,14 +165,15 @@ func (j *Job) fetchCategory(ctx context.Context, category string) error {
 			}
 		}
 
-		exists, err := models.ExistingGUIDsForFeed(j.feedID, guids)
+		exists, err := j.deps.Repo.ExistingGUIDsForFeed(ctx, j.feedID, guids)
 		if err != nil {
 			return fmt.Errorf("%s page=%d: exists query: %w", category, page, err)
 		}
+		existsSet := utils.ToSet(exists)
 
 		newItems := make([]apiItem, 0, len(resp.Data.List))
 		for _, item := range resp.Data.List {
-			if _, ok := exists[item.gUID()]; !ok {
+			if _, ok := existsSet[item.gUID()]; !ok {
 				newItems = append(newItems, item)
 			}
 		}
@@ -223,11 +182,11 @@ func (j *Job) fetchCategory(ctx context.Context, category string) error {
 			entries, err := j.buildEntriesWithContent(ctx, newItems)
 			if err != nil {
 				if len(entries) > 0 {
-					_ = models.AddEntries(entries)
+					_ = j.deps.Repo.AddEntries(ctx, entries)
 				}
 				return fmt.Errorf("%s page=%d: build content: %w", category, page, err)
 			}
-			if err := models.AddEntries(entries); err != nil {
+			if err := j.deps.Repo.AddEntries(ctx, entries); err != nil {
 				return fmt.Errorf("%s page=%d: insert: %w", category, page, err)
 			}
 		}
@@ -277,15 +236,15 @@ func (j *Job) fetchListPage(ctx context.Context, category string, page int) (*ap
 	return &out, nil
 }
 
-func (j *Job) init() error {
+func (j *Job) init(ctx context.Context) error {
 	var err error
 	if j.feedID == 0 {
-		if j.feedID, err = common.RegisterFeed(feedCategory, feedName, feedPriority, feedURL, feedWebsite, feedIcon); err != nil {
+		if j.feedID, err = common.RegisterFeed(ctx, j.deps.Repo, feedCategory, feedName, feedPriority, feedURL, feedWebsite, feedIcon); err != nil {
 			return err
 		}
 	}
 
-	if j.cutoff, err = models.GetLatestFeedDate(j.feedID); err != nil {
+	if j.cutoff, err = j.deps.Repo.GetLatestFeedDate(ctx, j.feedID); err != nil {
 		return err
 	}
 

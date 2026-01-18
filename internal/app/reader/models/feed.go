@@ -1,30 +1,41 @@
 package models
 
 import (
+	"context"
 	"errors"
 
 	"gorm.io/gorm"
 
-	"reader/internal/app/reader"
+	"reader/internal/app/reader/domain"
+	"reader/internal/pkg/db/postgres"
 )
 
-// Feed feed
-type Feed struct {
-	ID int64
+var ErrFeedsURLAlreadyExists = errors.New("url already exists")
 
-	Name     string `gorm:"type:varchar(255);not null;index"`
-	Priority int8   `gorm:"default:10;not null;index"`
-	URL      string `gorm:"type:varchar(255);not null;unique"`
-	Website  string `gorm:"type:varchar(255)"`
-	IconURL  string `gorm:"type:varchar(255)"`
+const (
+	constraintFeedsURL = "uidx_feeds_url"
+)
+
+var feedsUniqueConstraintErr = map[string]error{
+	constraintFeedsURL: ErrFeedsURLAlreadyExists,
+}
+
+type Feed struct {
+	ID int64 `gorm:"primaryKey"`
+
+	Name     string `gorm:"not null"`
+	Priority int8   `gorm:"not null;default:10;index:idx_feeds_category_priority,priority:2"`
+	URL      string `gorm:"not null;uniqueIndex:uidx_feeds_url"`
+	Website  string `gorm:"not null"`
+	IconURL  string `gorm:"not null"`
 
 	Category   *Category
-	CategoryID int64
+	CategoryID int64 `gorm:"not null;index:idx_feeds_category_priority,priority:1"`
 	Entries    []*Entry
 }
 
-// AddFeed adds a feed
-func AddFeed(name string, priority int8, url, website, iconURL string, categoryID int64) (int64, error) {
+// AddFeed creates a feed.
+func (r *Repo) AddFeed(ctx context.Context, name string, priority int8, url, website, iconURL string, categoryID int64) (int64, error) {
 	feed := &Feed{
 		Name:       name,
 		Priority:   priority,
@@ -33,52 +44,48 @@ func AddFeed(name string, priority int8, url, website, iconURL string, categoryI
 		IconURL:    iconURL,
 		CategoryID: categoryID,
 	}
-	if res := db.Create(&feed); res.Error != nil {
-		return 0, res.Error
+	if err := r.db.WithContext(ctx).Create(feed).Error; err != nil {
+		return 0, postgres.MapUniqueConstraint(err, feedsUniqueConstraintErr)
 	}
-
 	return feed.ID, nil
 }
 
-// GetFeedAndCategoryNames gets the feed names that have category names
-func GetFeedAndCategoryNames() (map[int64]*reader.FeedCategoryName, error) {
+// GetFeedAndCategoryNames returns feed and category names indexed by feed ID.
+func (r *Repo) GetFeedAndCategoryNames(ctx context.Context) (map[int64]domain.FeedCategoryName, error) {
 	type result struct {
 		FeedID       int64
 		FeedName     string
 		CategoryName string
 	}
-
-	var results []*result
-	if res := db.Model(&Feed{}).
+	var results []result
+	if err := r.db.WithContext(ctx).Model(&Feed{}).
 		Select(
 			"feeds.id AS feed_id",
 			"feeds.name AS feed_name",
 			"categories.name AS category_name").
 		Joins("JOIN categories ON categories.id = feeds.category_id").
-		Scan(&results); res.Error != nil {
-		return nil, res.Error
+		Scan(&results).Error; err != nil {
+		return nil, err
 	}
 
-	names := make(map[int64]*reader.FeedCategoryName)
+	names := make(map[int64]domain.FeedCategoryName, len(results))
 	for _, res := range results {
-		names[res.FeedID] = &reader.FeedCategoryName{
+		names[res.FeedID] = domain.FeedCategoryName{
 			CategoryName: res.CategoryName,
 			FeedName:     res.FeedName,
 		}
 	}
-
 	return names, nil
 }
 
-// GetFeedIDForURL gets the feed ID for given URL, -1 for not found
-func GetFeedIDForURL(url string) (int64, error) {
-	var feed *Feed
-	if res := db.Where(&Feed{URL: url}).First(&feed); res.Error != nil {
-		if errors.Is(res.Error, gorm.ErrRecordNotFound) {
-			return -1, nil
+// GetFeedIDForURL returns the feed ID for a URL.
+func (r *Repo) GetFeedIDForURL(ctx context.Context, url string) (int64, bool, error) {
+	var feed Feed
+	if err := r.db.WithContext(ctx).Where("url = ?", url).Take(&feed).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return 0, false, nil
 		}
-		return 0, res.Error
+		return 0, false, err
 	}
-
-	return feed.ID, nil
+	return feed.ID, true, nil
 }

@@ -8,6 +8,7 @@ import (
 	"golang.org/x/sync/semaphore"
 
 	"reader/internal/app/reader/feeds/common"
+	"reader/internal/app/reader/models"
 	"reader/internal/pkg/downloader"
 	"reader/internal/pkg/scheduler"
 )
@@ -21,8 +22,8 @@ const (
 	stopTimeout  = 5 * time.Second
 )
 
-// PollFeeds start poll of all feeds
-func PollFeeds(parent context.Context, log *logrus.Logger) (context.Context, context.CancelFunc) {
+// PollFeeds starts periodic polling of all feeds.
+func PollFeeds(parent context.Context, log *logrus.Logger, repo *models.Repo) (context.Context, context.CancelFunc) {
 	if parent == nil {
 		parent = context.Background()
 	}
@@ -31,6 +32,7 @@ func PollFeeds(parent context.Context, log *logrus.Logger) (context.Context, con
 
 	deps := common.Deps{
 		HTTP:     downloader.New(httpTimeout),
+		Repo:     repo,
 		HTTPPool: semaphore.NewWeighted(maxPoolSize),
 		Log:      log,
 	}

@@ -8,7 +8,7 @@ import (
 	"golang.org/x/crypto/bcrypt"
 )
 
-// HashPassword generates password hash
+// HashPassword returns a bcrypt hash of the password.
 func HashPassword(password string) (string, error) {
 	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
 	if err != nil {
@@ -17,7 +17,7 @@ func HashPassword(password string) (string, error) {
 	return string(hash), nil
 }
 
-// VerifyPassword verifies password with hash
+// VerifyPassword checks if password matches the bcrypt hash.
 func VerifyPassword(password, hash string) (bool, error) {
 	if err := bcrypt.CompareHashAndPassword([]byte(hash), []byte(password)); err != nil {
 		if errors.Is(err, bcrypt.ErrMismatchedHashAndPassword) {
@@ -28,7 +28,7 @@ func VerifyPassword(password, hash string) (bool, error) {
 	return true, nil
 }
 
-// Sha1 generates sha1 hash for plain string
+// Sha1 returns the hex-encoded SHA1 hash of s.
 func Sha1(plain string) string {
 	sum := sha1.Sum([]byte(plain))
 	return hex.EncodeToString(sum[:])

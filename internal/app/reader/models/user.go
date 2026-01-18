@@ -1,41 +1,51 @@
 package models
 
 import (
+	"context"
 	"errors"
 
 	"gorm.io/gorm"
+
+	"reader/internal/pkg/db/postgres"
 )
 
-// User user
-type User struct {
-	ID int64
+var ErrUsersEmailAlreadyExists = errors.New("email already exists")
 
-	Email    string `gorm:"type:varchar(255);not null;unique"`
-	Password string `gorm:"type:varchar(255);not null"` // hashed result
+const (
+	constraintUsersEmail = "uidx_users_email"
+)
+
+var usersUniqueConstraintErr = map[string]error{
+	constraintUsersEmail: ErrUsersEmailAlreadyExists,
 }
 
-// AddUser adds user for email and hashed password
-func AddUser(email, password string) (int64, error) {
+type User struct {
+	ID int64 `gorm:"primaryKey"`
+
+	Email    string `gorm:"not null;uniqueIndex:uidx_users_email"`
+	Password string `gorm:"not null"` // hashed
+}
+
+// AddUser creates a user with email and hashed password.
+func (r *Repo) AddUser(ctx context.Context, email, password string) (int64, error) {
 	user := &User{
 		Email:    email,
 		Password: password,
 	}
-	if res := db.Create(&user); res.Error != nil {
-		return 0, res.Error
+	if err := r.db.WithContext(ctx).Create(user).Error; err != nil {
+		return 0, postgres.MapUniqueConstraint(err, usersUniqueConstraintErr)
 	}
-
 	return user.ID, nil
 }
 
-// GetUser gets user with email
-func GetUser(email string) (*User, error) {
-	var user *User
-	if res := db.Where(&User{Email: email}).First(&user); res.Error != nil {
-		if errors.Is(res.Error, gorm.ErrRecordNotFound) {
-			return nil, nil
+// GetUser returns a user by email.
+func (r *Repo) GetUser(ctx context.Context, email string) (*User, bool, error) {
+	var user User
+	if err := r.db.WithContext(ctx).Where("email = ?", email).Take(&user).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, false, nil
 		}
-		return nil, res.Error
+		return nil, false, err
 	}
-
-	return user, nil
+	return &user, true, nil
 }
